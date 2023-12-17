@@ -1,9 +1,33 @@
 services:
   rbxlk:
+    build:
+      context: .
+      target: rbxlk
     restart: always
     depends_on:
       - postgres
-    build: .
+    env_file:
+      - .env
+    environment:
+      - DATABASE_URL=postgres://rbxlk:mypassword@postgres/rbxlk
+
+  cron:
+    build:
+      context: .
+      target: cron
+    restart: always
+    depends_on:
+      - postgres
+    environment:
+      - DATABASE_URL=postgres://rbxlk:mypassword@postgres/rbxlk
+    
+  web:
+    build:
+      context: .
+      target: web
+    restart: always
+    depends_on:
+      - postgres
     env_file:
       - .env
     environment:
@@ -13,6 +37,7 @@ services:
 
   postgres:
     image: postgres
+    restart: always
     volumes:
       - postgres_storage:/var/lib/postgresql/data
     environment:
