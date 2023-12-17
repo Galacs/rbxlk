@@ -128,6 +128,19 @@ async fn complete(
     Ok(())
 }
 
+/// Cancels a verification attempt
+#[poise::command(slash_command, prefix_command)]
+async fn cancel(
+    ctx: Context<'_>,
+) -> Result<(), Error> {
+    let conn = &ctx.data().0;
+    let user_id = ctx.author().id.0 as i64;
+
+    sqlx::query!("DELETE FROM verif WHERE discord_id=$1", user_id).execute(conn).await?;
+    ctx.say("Your verification attempt was cancelled, use /link to start a new one").await?;
+    Ok(())
+}
+
 #[tokio::main]
 async fn main() -> Result<(), Error> {
     // Loads dotenv file
@@ -145,7 +158,7 @@ async fn main() -> Result<(), Error> {
 
     let framework = poise::Framework::builder()
         .options(poise::FrameworkOptions {
-            commands: vec![balance(), link(), complete()],
+            commands: vec![balance(), link(), complete(), cancel()],
             event_handler: |_ctx, event, _framework, _data| {
                 Box::pin(async move {
                     if let poise::event::Event::Ready { data_about_bot } = event {
