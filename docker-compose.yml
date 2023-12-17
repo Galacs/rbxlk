@@ -33,7 +33,7 @@ services:
     environment:
       - DATABASE_URL=postgres://rbxlk:mypassword@postgres/rbxlk
     ports:
-      - '8080:80'
+      - '8080:8080'
 
   postgres:
     image: postgres
