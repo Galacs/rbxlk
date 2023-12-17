@@ -16,7 +16,7 @@ ROBLOSECURITY=cookie
 
 You can the included docker compose file to directly spin up the bot and its services with a postgres database.
 
-##### Run sqlx prepare in the root, services/cron and services/web
+#### Run sqlx prepare in the root, services/cron and services/web
 
 ```bash
 cargo sqlx prepare
@@ -27,3 +27,7 @@ cargo sqlx prepare
 ```bash
 docker compose up -d
 ```
+
+## Using the web api
+
+To add or remove balance to users, you can send a post request to /give on port 8080, with a username header and an amount header.
