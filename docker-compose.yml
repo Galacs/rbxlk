@@ -1,0 +1,35 @@
+services:
+  rbxlk:
+    restart: always
+    depends_on:
+      - postgres
+    build: .
+    env_file:
+      - .env
+    environment:
+      - DATABASE_URL=postgres://rbxlk:mypassword@postgres/rbxlk
+    ports:
+      - '8080:80'
+
+  postgres:
+    image: postgres
+    volumes:
+      - postgres_storage:/var/lib/postgresql/data
+    environment:
+      POSTGRES_DB: rbxlk
+      POSTGRES_USER: rbxlk
+      POSTGRES_PASSWORD: mypassword
+    ports:
+      - '5432:5432'
+
+  pgadmin:
+    image: dpage/pgadmin4
+    restart: always
+    environment:
+      PGADMIN_DEFAULT_EMAIL: root@root.pam
+      PGADMIN_DEFAULT_PASSWORD: root
+    ports:
+      - "5050:80"
+
+volumes:
+  postgres_storage: {}

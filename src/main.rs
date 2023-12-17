@@ -62,13 +62,13 @@ async fn link(
 
     if let Ok(row) = sqlx::query!("SELECT * FROM users WHERE discord_id=$1", user_id).fetch_one(conn).await {
         let user = client.user_details(row.roblox_id as u64).await?;
-        ctx.say(format!("You discord account is alreadu linked to {}, id: {}", user.username, user.id)).await?;
+        ctx.say(format!("You discord account is already linked to {}, id: {}", user.username, user.id)).await?;
         return Ok(());
     }
 
     if let Ok(row) = sqlx::query!("SELECT * FROM verif WHERE discord_id=$1", user_id).fetch_one(conn).await {
         let user = client.user_details(row.roblox_id as u64).await?;
-        ctx.say(format!("You already have started a verification process with the roblox username {}, id: {}, to cancel that one, use /cancel", user.username, user.id)).await?;
+        ctx.say(format!("You already have started a verification process with the Roblox username {}, id: {}, to cancel that one, use /cancel", user.username, user.id)).await?;
         return Ok(());
     }
 
@@ -93,7 +93,7 @@ async fn link(
 
     sqlx::query!("INSERT INTO verif(discord_id, roblox_id, string) VALUES ($1, $2, $3)", user_id, roblox_id as i64, &rand_string).execute(conn).await?;
 
-    ctx.say(format!("Found user roblox user {} with the id {}. Verification has started, please put the string {} in your profile's description and use /complete to complete the verification", roblox_display_name, roblox_id, rand_string)).await?;
+    ctx.say(format!("Found user Roblox user {} with the id {}.\nVerification has started, please put the string {} in your profile's description and use /complete to complete the verification", roblox_display_name, roblox_id, rand_string)).await?;
 
     ctx.defer().await?;
 
