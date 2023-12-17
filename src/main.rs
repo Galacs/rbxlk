@@ -60,6 +60,12 @@ async fn link(
     let client = &ctx.data().1;
     let user_id = ctx.author().id.0 as i64;
 
+    if let Ok(row) = sqlx::query!("SELECT * FROM users WHERE discord_id=$1", user_id).fetch_one(conn).await {
+        let user = client.user_details(row.roblox_id as u64).await?;
+        ctx.say(format!("You discord account is alreadu linked to {}, id: {}", user.username, user.id)).await?;
+        return Ok(());
+    }
+
     if let Ok(row) = sqlx::query!("SELECT * FROM verif WHERE discord_id=$1", user_id).fetch_one(conn).await {
         let user = client.user_details(row.roblox_id as u64).await?;
         ctx.say(format!("You already have started a verification process with the roblox username {}, id: {}, to cancel that one, use /cancel", user.username, user.id)).await?;
@@ -94,6 +100,34 @@ async fn link(
     Ok(())
 }
 
+/// Complete the link of your discord account to your roblox's
+#[poise::command(slash_command, prefix_command)]
+async fn complete(
+    ctx: Context<'_>,
+) -> Result<(), Error> {
+    let conn = &ctx.data().0;
+    let client = &ctx.data().1;
+    let user_id = ctx.author().id.0 as i64;
+    let Ok(row) = sqlx::query!("SELECT roblox_id,string FROM verif WHERE discord_id=$1", user_id).fetch_one(conn).await else {
+        ctx.say("You have no ongoing verification process, to start one, use the /link command").await?;
+        return Ok(())
+    };
+
+    let user = client.user_details(row.roblox_id as u64).await?;
+
+    if user.description.contains(&row.string) {
+        let mut tx = conn.begin().await?;
+        sqlx::query!("DELETE FROM verif WHERE discord_id=$1", user_id).execute(&mut *tx).await?;
+        sqlx::query!("INSERT INTO users(discord_id, roblox_id) VALUES ($1,$2)", user_id, row.roblox_id as i64).execute(&mut *tx).await?;
+        tx.commit().await?;
+        ctx.say(format!("Your discord account was successfully linked with {}, id: {}", user.username, user.id)).await?;
+    } else {
+        ctx.say(format!("Your specified roblox account, {}, id: {}, doesn't currently have the string {} inside its description", user.username, user.id, row.string)).await?;
+    }
+
+    Ok(())
+}
+
 #[tokio::main]
 async fn main() -> Result<(), Error> {
     // Loads dotenv file
@@ -111,7 +145,7 @@ async fn main() -> Result<(), Error> {
 
     let framework = poise::Framework::builder()
         .options(poise::FrameworkOptions {
-            commands: vec![balance(), link()],
+            commands: vec![balance(), link(), complete()],
             event_handler: |_ctx, event, _framework, _data| {
                 Box::pin(async move {
                     if let poise::event::Event::Ready { data_about_bot } = event {
