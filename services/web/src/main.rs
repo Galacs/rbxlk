@@ -11,7 +11,7 @@ async fn greet(req: HttpRequest, data: web::Data<Data>) -> impl Responder {
     let Some(username) = req.headers().get("username") else {
         return HttpResponse::BadRequest().body("Error: no username header provided");
     };
-    let username = username.to_str().unwrap();
+    let username = username.to_str().unwrap().replace('@', "");
     let Some(amount) = req.headers().get("amount") else {
         return HttpResponse::build(StatusCode::BAD_REQUEST)
             .insert_header(ContentType::html())
