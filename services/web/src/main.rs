@@ -3,6 +3,18 @@ use sqlx::{Pool, Postgres, PgPool};
 
 pub struct Data(Pool<Postgres>, Option<String>);
 
+fn parse_human_readable_number(input: &str) -> Option<f64> {
+    let multiplier = match input.chars().last()? {
+        'K' | 'k' => 1_000.0,
+        'M' | 'm' => 1_000_000.0,
+        'B' | 'b' => 1_000_000_000.0,
+        _ => return input.parse().ok(),
+    };
+
+    let num_str = &input[..input.len() - 1];
+    num_str.parse::<f64>().ok().map(|num| num * multiplier)
+}
+
 #[post("/give")]
 async fn greet(req: HttpRequest, data: web::Data<Data>) -> impl Responder {
     let conn = &data.as_ref().0;
@@ -17,7 +29,8 @@ async fn greet(req: HttpRequest, data: web::Data<Data>) -> impl Responder {
             .insert_header(ContentType::html())
             .body("Error: no amount header provided");
     };
-    let Ok(amount) = amount.to_str().unwrap().parse::<i64>() else {
+    // let Ok(amount) = amount.to_str().unwrap().parse::<i64>() else {
+    let Some(amount) = parse_human_readable_number(amount.to_str().unwrap()) else {
         return HttpResponse::BadRequest().body("Amount malformed");
     };
 
