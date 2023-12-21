@@ -1,7 +1,7 @@
 use actix_web::{post, web, App, HttpServer, Responder, HttpRequest, HttpResponse, http::{header::ContentType, StatusCode}};
 use sqlx::{Pool, Postgres, PgPool};
 
-pub struct Data(Pool<Postgres>, Option<String>);
+pub struct Data(Pool<Postgres>, Option<String>, Option<String>);
 
 fn parse_human_readable_number(input: &str) -> Option<f64> {
     let multiplier = match input.chars().last()? {
@@ -17,6 +17,15 @@ fn parse_human_readable_number(input: &str) -> Option<f64> {
 
 #[post("/give")]
 async fn give(req: HttpRequest, data: web::Data<Data>) -> impl Responder {
+    if let Some(secret) = &data.as_ref().2 {
+        let Some(header) = req.headers().get("security") else {
+            return HttpResponse::Unauthorized().body("Error: no security header provided");
+        };
+        if header.to_str().unwrap() != secret {
+            return HttpResponse::Unauthorized().body("Error: wrong security header");
+        }
+    }
+
     let conn = &data.as_ref().0;
     let roblosecurity = &data.as_ref().1;
 
@@ -66,10 +75,13 @@ async fn main() -> anyhow::Result<()> {
     let conn = PgPool::connect(&database_url).await?;
     sqlx::migrate!("../../migrations").run(&conn).await?;
 
-
+    let security = std::env::var("SECURITY_HEADER").ok();
+    if security.is_none() {
+        println!("Unsafe: No security header set")
+    }
 
     HttpServer::new(move || {
-        App::new().service(give).app_data(web::Data::new(Data(conn.clone(), std::env::var("ROBLOSECURITY").ok())))
+        App::new().service(give).app_data(web::Data::new(Data(conn.clone(), std::env::var("ROBLOSECURITY").ok(), security.to_owned())))
     })
     .bind(("0.0.0.0", 8080))?
     .run()
