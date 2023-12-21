@@ -16,7 +16,7 @@ fn parse_human_readable_number(input: &str) -> Option<f64> {
 }
 
 #[post("/give")]
-async fn greet(req: HttpRequest, data: web::Data<Data>) -> impl Responder {
+async fn give(req: HttpRequest, data: web::Data<Data>) -> impl Responder {
     let conn = &data.as_ref().0;
     let roblosecurity = &data.as_ref().1;
 
@@ -69,7 +69,7 @@ async fn main() -> anyhow::Result<()> {
 
 
     HttpServer::new(move || {
-        App::new().service(greet).app_data(web::Data::new(Data(conn.clone(), std::env::var("ROBLOSECURITY").ok())))
+        App::new().service(give).app_data(web::Data::new(Data(conn.clone(), std::env::var("ROBLOSECURITY").ok())))
     })
     .bind(("0.0.0.0", 8080))?
     .run()
