@@ -2,7 +2,7 @@
 use crate::{Context, Error};
 
 
-/// Links your discord account to your roblox's
+/// Creates an embed message
 #[poise::command(slash_command, prefix_command)]
 pub async fn create_embed(
     ctx: Context<'_>,
