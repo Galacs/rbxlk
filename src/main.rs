@@ -1,12 +1,15 @@
-use poise::serenity_prelude::{self as serenity, User};
+use poise::serenity_prelude::{self as serenity, User, CacheHttp};
 use sqlx::{Pool, Postgres, PgPool};
+use async_trait::async_trait;
 
-use rand::{thread_rng, Rng};
-use rand::distributions::Alphanumeric;
+mod link;
+mod event;
+
+use link::{create_link_embed::create_embed, link::link};
 
 pub struct Data(Pool<Postgres>, roboat::Client);
-type Error = Box<dyn std::error::Error + Send + Sync>;
-type Context<'a> = poise::Context<'a, Data, Error>;
+pub type Error = Box<dyn std::error::Error + Send + Sync>;
+pub type Context<'a> = poise::Context<'a, Data, Error>;
 
 // Returns false if user isn't in the db
 async fn user_exists(user_id: i64, conn: &Pool<Postgres>) -> Result<bool, Error> {
@@ -15,6 +18,27 @@ async fn user_exists(user_id: i64, conn: &Pool<Postgres>) -> Result<bool, Error>
     } else {
         Ok(true)
     }
+}
+
+#[async_trait]
+trait Repliable {
+    async fn send_reply(&self, http: &impl CacheHttp, msg: String) -> Result<(), Error>;
+}
+
+#[async_trait]
+impl Repliable for Context<'_> {
+    async fn send_reply(&self, _http: &impl CacheHttp, msg: String) -> Result<(), Error> {
+        self.say(msg).await?;
+        Ok(())
+    } 
+}
+
+#[async_trait]
+impl Repliable for serenity::channel::Message {
+    async fn send_reply(&self, http: &impl CacheHttp, msg: String) -> Result<(), Error> {
+        self.reply(http, msg).await?;
+        Ok(())
+    } 
 }
 
 fn get_pretty_username(user: &User) -> String {
@@ -46,56 +70,6 @@ async fn balance(
         Some(u) => ctx.say(format!("{} has {}", get_pretty_username(u), balance)).await?,
         None => ctx.say(format!("You have {}", balance)).await?,
     };
-
-    Ok(())
-}
-
-/// Links your discord account to your roblox's
-#[poise::command(slash_command, prefix_command)]
-async fn link(
-    ctx: Context<'_>,
-    #[description = "Roblox username or id"] input: String,
-) -> Result<(), Error> {
-    let conn = &ctx.data().0;
-    let client = &ctx.data().1;
-    let user_id = ctx.author().id.0 as i64;
-
-    if let Ok(row) = sqlx::query!("SELECT * FROM users WHERE discord_id=$1", user_id).fetch_one(conn).await {
-        let user = client.user_details(row.roblox_id as u64).await?;
-        ctx.say(format!("You discord account is already linked to {}, id: {}", user.username, user.id)).await?;
-        return Ok(());
-    }
-
-    if let Ok(row) = sqlx::query!("SELECT * FROM verif WHERE discord_id=$1", user_id).fetch_one(conn).await {
-        let user = client.user_details(row.roblox_id as u64).await?;
-        ctx.say(format!("You already have started a verification process with the Roblox username {}, id: {}, to cancel that one, use /cancel", user.username, user.id)).await?;
-        return Ok(());
-    }
-
-    let (roblox_id, roblox_display_name) = match input.parse::<u64>() {
-        Err(_) => {
-            let users = vec![input.clone().to_owned()];
-            let all_username_user_details = client.username_user_details(users, true).await?;
-            let user = all_username_user_details.first().ok_or("User not found")?;
-            (user.id, user.display_name.clone())
-        },
-        Ok(id) => {
-            let user = client.user_details(id).await?;
-            (user.id, user.display_name)
-        },
-    };
-
-    let rand_string: String = thread_rng()
-        .sample_iter(&Alphanumeric)
-        .take(6)
-        .map(char::from)
-        .collect();
-
-    sqlx::query!("INSERT INTO verif(discord_id, roblox_id, string) VALUES ($1, $2, $3)", user_id, roblox_id as i64, &rand_string).execute(conn).await?;
-
-    ctx.say(format!("Found user Roblox user {} with the id {}.\nVerification has started, please put the string {} in your profile's description and use /complete to complete the verification", roblox_display_name, roblox_id, rand_string)).await?;
-
-    ctx.defer().await?;
 
     Ok(())
 }
@@ -158,14 +132,9 @@ async fn main() -> Result<(), Error> {
 
     let framework = poise::Framework::builder()
         .options(poise::FrameworkOptions {
-            commands: vec![balance(), link(), complete(), cancel()],
-            event_handler: |_ctx, event, _framework, _data| {
-                Box::pin(async move {
-                    if let poise::event::Event::Ready { data_about_bot } = event {
-                        println!("Logged in as {}", data_about_bot.user.name);
-                    }
-                    Ok(())
-                })
+            commands: vec![balance(), link(), create_embed(), complete(), cancel()],
+            event_handler: |ctx, event, framework, data| {
+                Box::pin(event::event_handler(ctx, event, framework, data))
             },
             ..Default::default()
         })
