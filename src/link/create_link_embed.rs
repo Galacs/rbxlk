@@ -3,7 +3,7 @@ use crate::{Context, Error};
 
 
 /// Creates an embed message
-#[poise::command(slash_command, prefix_command)]
+#[poise::command(slash_command, prefix_command, owners_only, hide_in_help)]
 pub async fn create_embed(
     ctx: Context<'_>,
 ) -> Result<(), Error> {
