@@ -166,16 +166,17 @@ pub async fn withdraw_backend(author_id: i64, data: &Data, ctx: &impl crate::Int
     };
 
     if row.balance < price as i64 {
-        ctx.create_interaction_response(http.http(), |i| i.interaction_response_data(|m| m.content(format!("You don't have enough balance to withdraw {amount} robux, to do that, you need {price} and you only have {}", row.balance)))).await?;
+        ctx.create_interaction_response(http.http(), |i| i.interaction_response_data(|m| m.content(format!("You don't have enough balance to withdraw {amount} robux, to do that, you need {price} and you only have {}", row.balance)).ephemeral(true))).await?;
     }
 
     if sqlx::query!("INSERT INTO withdraw(discord_id, amount, price) VALUES ($1, $2, $3)", author_id, amount, price).execute(conn).await.is_err() {
-        ctx.create_interaction_response(http.http(), |i| i.interaction_response_data(|m| m.content("Your already have a withdrawal process with that amount"))).await?;
+        ctx.create_interaction_response(http.http(), |i| i.interaction_response_data(|m| m.content("Your already have a withdrawal process with that amount").ephemeral(true))).await?;
         return Ok(())
     }
 
     ctx.create_interaction_response(http.http(), |i| i.interaction_response_data(|m| {
         m.content(format!("Withdrawal process of {} robux for a price of {} initiated for <@{}> with roblox account {}, Please create an asset worth that amount", amount, price, author_id, row.roblox_username.unwrap_or_default()))
+        .ephemeral(true)
         .components(|c| c.create_action_row(|r| {
             r.create_button(|b| {
                 b.custom_id(format!("withdraw_complete-{}", amount))

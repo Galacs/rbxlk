@@ -15,13 +15,13 @@ pub async fn link_backend(author_id: i64, data: &Data, ctx: &impl crate::Interac
 
     if let Ok(row) = sqlx::query!("SELECT * FROM users WHERE discord_id=$1", user_id).fetch_one(conn).await {
         let user = client.user_details(row.roblox_id as u64).await?;
-        ctx.create_interaction_response(http.http(), |i| i.interaction_response_data(|m| m.content(format!("You discord account is already linked to {}, id: {}", user.username, user.id)))).await?;
+        ctx.create_interaction_response(http.http(), |i| i.interaction_response_data(|m| m.content(format!("You discord account is already linked to {}, id: {}", user.username, user.id)).ephemeral(true))).await?;
         return Ok(());
     }
 
     if let Ok(row) = sqlx::query!("SELECT * FROM verif WHERE discord_id=$1", user_id).fetch_one(conn).await {
         let user = client.user_details(row.roblox_id as u64).await?;
-        ctx.create_interaction_response(http.http(), |i| i.interaction_response_data(|m| m.content(format!("You already have started a verification process with the Roblox username {}, id: {}, to cancel that one, use /cancel", user.username, user.id)))).await?;
+        ctx.create_interaction_response(http.http(), |i| i.interaction_response_data(|m| m.content(format!("You already have started a verification process with the Roblox username {}, id: {}, to cancel that one, use /cancel", user.username, user.id)).ephemeral(true))).await?;
         return Ok(());
     }
 
@@ -48,6 +48,7 @@ pub async fn link_backend(author_id: i64, data: &Data, ctx: &impl crate::Interac
 
     ctx.create_interaction_response(http.http(), |i| i.interaction_response_data(|m| {
         m.content(format!("Found user Roblox user {} with the id {}.\nVerification has started, please put the string {} in your profile's description and use /complete to complete the verification or press the confirm button", roblox_display_name, roblox_id, rand_string))
+        .ephemeral(true)
         .components(|c| c.create_action_row(|r| {
             r.create_button(|b| {
                 b.custom_id("complete")
