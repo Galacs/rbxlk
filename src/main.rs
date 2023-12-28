@@ -179,6 +179,19 @@ async fn cancel_backend(author_id: &UserId, data: &Data, ctx: &impl crate::Inter
     Ok(())
 }
 
+/// Sets global swap rate
+#[poise::command(slash_command, prefix_command, owners_only, hide_in_help)]
+async fn set_rate(
+    ctx: Context<'_>,
+    rate: f32,
+) -> Result<(), Error> {
+    let conn = &ctx.data().0;
+    sqlx::query!("UPDATE swap_rate SET rate = $1", rate).execute(conn).await?;
+    ctx.say(format!("Rate is now set to {}", rate)).await?;
+    Ok(())
+}
+
+
 
 #[tokio::main]
 async fn main() -> Result<(), Error> {
@@ -197,7 +210,7 @@ async fn main() -> Result<(), Error> {
 
     let framework = poise::Framework::builder()
         .options(poise::FrameworkOptions {
-            commands: vec![balance(), link(), unlink(), create_embed(), complete(), cancel()],
+            commands: vec![balance(), set_rate(), link(), unlink(), create_embed(), complete(), cancel()],
             event_handler: |ctx, event, framework, data| {
                 Box::pin(event::event_handler(ctx, event, framework, data))
             },

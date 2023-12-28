@@ -1,0 +1,1 @@
+DROP TABLE swap_rate;
