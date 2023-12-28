@@ -1,4 +1,5 @@
 use actix_web::{post, web, App, HttpServer, Responder, HttpRequest, HttpResponse, http::{header::ContentType, StatusCode}};
+use anyhow::Error;
 use sqlx::{Pool, Postgres, PgPool};
 
 pub struct Data(Pool<Postgres>, Option<String>, Option<String>);
@@ -27,12 +28,11 @@ async fn give(req: HttpRequest, data: web::Data<Data>) -> impl Responder {
     }
 
     let conn = &data.as_ref().0;
-    let roblosecurity = &data.as_ref().1;
 
     let Some(username) = req.headers().get("username") else {
         return HttpResponse::BadRequest().body("Error: no username header provided");
     };
-    let username = username.to_str().unwrap().replace('@', "");
+    let mut username = username.to_str().unwrap().replace('@', "");
     let Some(amount) = req.headers().get("amount") else {
         return HttpResponse::build(StatusCode::BAD_REQUEST)
             .insert_header(ContentType::html())
@@ -43,19 +43,19 @@ async fn give(req: HttpRequest, data: web::Data<Data>) -> impl Responder {
         return HttpResponse::BadRequest().body("Amount malformed");
     };
 
-    // Roblox API client
-    let client = roboat::ClientBuilder::new()
-        .roblosecurity(roblosecurity.clone().unwrap_or_default())
-        .build();
+    async fn get_closest_user(pool: &Pool<Postgres>, username: &mut String) -> Result<i64, Error> {
+        let Ok(user) = sqlx::query!("SELECT * FROM users ORDER BY SIMILARITY(roblox_username, $1) DESC LIMIT 1", *username).fetch_one(pool).await else {
+            return Err(anyhow::anyhow!("User not found error"))
+        };
+        if let Some(name) = user.roblox_username {
+            *username = name;
+        }
+        Ok(user.roblox_id)
+    }
 
-    let users = vec![username.to_owned()];
-    let Ok(all_username_user_details) = client.username_user_details(users, true).await else {
+    let Ok(roblox_id) = get_closest_user(conn, &mut username).await else {
         return HttpResponse::BadRequest().body("User not found");
     };
-    let Ok(user) = all_username_user_details.first().ok_or("User not found") else {
-        return HttpResponse::BadRequest().body("User not found");
-    };
-    let roblox_id = user.id as i64;
 
     let Ok(row) = sqlx::query!("UPDATE users SET balance = balance + $1 WHERE roblox_id = $2", amount as i64, roblox_id).execute(conn).await else {
         return HttpResponse::InternalServerError().body("Database error");
