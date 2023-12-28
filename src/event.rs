@@ -106,12 +106,8 @@ pub async fn event_handler(
                     withdraw_backend(interaction.user.id.0 as i64, data, &merged_interaction, &ctx.http, amount).await?;
                 },
                 _ => {
-                    println!("here");
                     if interaction.data.custom_id.starts_with("withdraw_cancel") {
-                        println!("here");
-                        dbg!(interaction.data.custom_id.split('-'));
                         let amount = interaction.data.custom_id.split('-').nth(1).ok_or("no amount in custom_id")?.parse()?;
-                        dbg!(amount);
                         cancel_withdraw_backend(&interaction.user.id, data, &merged_interaction, &ctx.http, amount).await?;
                     }
                 }

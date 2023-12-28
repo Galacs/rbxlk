@@ -220,8 +220,6 @@ async fn cancel_backend(author_id: &UserId, data: &Data, ctx: &impl crate::Inter
 async fn cancel_withdraw_backend(author_id: &UserId, data: &Data, ctx: &impl crate::InteractionReponse, http: &impl CacheHttp, amount: i32) -> Result<(), Error> {
     let conn = &data.0;
     let user_id = author_id.0 as i64;
-    println!("called");
-    dbg!(amount);
     sqlx::query!("DELETE FROM withdraw WHERE discord_id=$1 AND amount=$2", user_id, amount).execute(conn).await?;
     ctx.create_interaction_response(http.http(), |i| i.interaction_response_data(|m| m.content(format!("You withdrawal process for {} robux was cancelled", amount)))).await?;
     Ok(())
