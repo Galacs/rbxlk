@@ -1,4 +1,4 @@
-use poise::serenity_prelude::{self as serenity, User, CacheHttp};
+use poise::{serenity_prelude::{self as serenity, User, CacheHttp, UserId, CreateInteractionResponse}, ApplicationCommandOrAutocompleteInteraction};
 use sqlx::{Pool, Postgres, PgPool};
 use async_trait::async_trait;
 
@@ -30,7 +30,7 @@ impl Repliable for Context<'_> {
     async fn send_reply(&self, _http: &impl CacheHttp, msg: String) -> Result<(), Error> {
         self.say(msg).await?;
         Ok(())
-    } 
+    }
 }
 
 #[async_trait]
@@ -38,7 +38,47 @@ impl Repliable for serenity::channel::Message {
     async fn send_reply(&self, http: &impl CacheHttp, msg: String) -> Result<(), Error> {
         self.reply(http, msg).await?;
         Ok(())
-    } 
+    }
+}
+
+pub enum MergedInteraction<'a> {
+    SerenityApplicationInteraction(&'a serenity::ApplicationCommandInteraction),
+    SerenityMessageComponentInteraction(serenity::MessageComponentInteraction),
+    SerenityModalSubmitInteraction(serenity::ModalSubmitInteraction),
+}
+
+#[async_trait]
+trait InteractionReponse {
+    async fn create_interaction_response<'a, F>(
+        &self,
+        http: impl AsRef<serenity::Http> + std::marker::Send,
+        f: F,
+    ) -> Result<(), Error>
+    where
+        for<'b> F: FnOnce(
+            &'b mut CreateInteractionResponse<'a>,
+        ) -> &'b mut CreateInteractionResponse<'a> + std::marker::Send;
+}
+
+#[async_trait]
+impl InteractionReponse for MergedInteraction<'_> {
+    async fn create_interaction_response<'a, F>(
+        &self,
+        http: impl AsRef<serenity::Http> + std::marker::Send,
+        f: F,
+    ) -> Result<(), Error>
+    where
+        for<'b> F: FnOnce(
+            &'b mut CreateInteractionResponse<'a>,
+        ) -> &'b mut CreateInteractionResponse<'a> + std::marker::Send
+    {
+        match self {
+            MergedInteraction::SerenityApplicationInteraction(interaction) => interaction.create_interaction_response(http, f).await?,
+            MergedInteraction::SerenityMessageComponentInteraction(interaction) => interaction.create_interaction_response(http, f).await?,
+            MergedInteraction::SerenityModalSubmitInteraction(interaction) => interaction.create_interaction_response(http, f).await?,
+        };
+        Ok(())
+    }
 }
 
 fn get_pretty_username(user: &User) -> String {
@@ -79,11 +119,24 @@ async fn balance(
 async fn complete(
     ctx: Context<'_>,
 ) -> Result<(), Error> {
-    let conn = &ctx.data().0;
-    let client = &ctx.data().1;
-    let user_id = ctx.author().id.0 as i64;
+    let Context::Application(app_ctx) = ctx else {
+        return Ok(())
+    };
+    let ApplicationCommandOrAutocompleteInteraction::ApplicationCommand(interaction) = app_ctx.interaction else {
+        return Ok(())
+    };
+    let merged_interaction = MergedInteraction::SerenityApplicationInteraction(interaction);
+    complete_backend(&ctx.author().id, ctx.data(), &merged_interaction, ctx.http()).await?;
+    Ok(())
+}
+
+async fn complete_backend(author_id: &UserId, data: &Data, ctx: &impl crate::InteractionReponse, http: &impl CacheHttp) -> Result<(), Error> {
+    let conn = &data.0;
+    let client = &data.1;
+    let user_id = author_id.0 as i64;
+
     let Ok(row) = sqlx::query!("SELECT roblox_id,string FROM verif WHERE discord_id=$1", user_id).fetch_one(conn).await else {
-        ctx.say("You have no ongoing verification process, to start one, use the /link command").await?;
+        ctx.create_interaction_response(http.http(), |i| i.interaction_response_data(|m| m.content("You have no ongoing verification process, to start one, use the /link command"))).await?;
         return Ok(())
     };
 
@@ -94,11 +147,10 @@ async fn complete(
         sqlx::query!("DELETE FROM verif WHERE discord_id=$1", user_id).execute(&mut *tx).await?;
         sqlx::query!("INSERT INTO users(discord_id, roblox_id) VALUES ($1,$2)", user_id, row.roblox_id as i64).execute(&mut *tx).await?;
         tx.commit().await?;
-        ctx.say(format!("Your discord account was successfully linked with {}, id: {}", user.username, user.id)).await?;
+        ctx.create_interaction_response(http.http(), |i| i.interaction_response_data(|m| m.content(format!("Your discord account was successfully linked with {}, id: {}", user.username, user.id)))).await?;
     } else {
-        ctx.say(format!("Your specified roblox account, {}, id: {}, doesn't currently have the string {} inside its description", user.username, user.id, row.string)).await?;
+        ctx.create_interaction_response(http.http(), |i| i.interaction_response_data(|m| m.content(format!("Your specified roblox account, {}, id: {}, doesn't currently have the string {} inside its description", user.username, user.id, row.string)))).await?;
     }
-
     Ok(())
 }
 
@@ -107,13 +159,26 @@ async fn complete(
 async fn cancel(
     ctx: Context<'_>,
 ) -> Result<(), Error> {
-    let conn = &ctx.data().0;
-    let user_id = ctx.author().id.0 as i64;
-
-    sqlx::query!("DELETE FROM verif WHERE discord_id=$1", user_id).execute(conn).await?;
-    ctx.say("Your verification attempt was cancelled, use /link to start a new one").await?;
+    let Context::Application(app_ctx) = ctx else {
+        return Ok(())
+    };
+    let ApplicationCommandOrAutocompleteInteraction::ApplicationCommand(interaction) = app_ctx.interaction else {
+        return Ok(())
+    };
+    let merged_interaction = MergedInteraction::SerenityApplicationInteraction(interaction);
+    cancel_backend(&ctx.author().id, ctx.data(), &merged_interaction, ctx.http()).await?;
     Ok(())
 }
+
+async fn cancel_backend(author_id: &UserId, data: &Data, ctx: &impl crate::InteractionReponse, http: &impl CacheHttp) -> Result<(), Error> {
+    let conn = &data.0;
+    let user_id = author_id.0 as i64;
+
+    sqlx::query!("DELETE FROM verif WHERE discord_id=$1", user_id).execute(conn).await?;
+    ctx.create_interaction_response(http.http(), |i| i.interaction_response_data(|m| m.content("Your verification attempt was cancelled, use /link to start a new one"))).await?;
+    Ok(())
+}
+
 
 #[tokio::main]
 async fn main() -> Result<(), Error> {
