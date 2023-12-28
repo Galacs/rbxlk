@@ -48,7 +48,7 @@ pub enum MergedInteraction<'a> {
 }
 
 #[async_trait]
-trait InteractionReponse {
+pub trait InteractionReponse {
     async fn create_interaction_response<'a, F>(
         &self,
         http: impl AsRef<serenity::Http> + std::marker::Send,
@@ -154,6 +154,44 @@ async fn complete_backend(author_id: &UserId, data: &Data, ctx: &impl crate::Int
     Ok(())
 }
 
+pub async fn withdraw_backend(author_id: i64, data: &Data, ctx: &impl crate::InteractionReponse, http: &impl CacheHttp, amount: i32) -> Result<(), Error> {
+    let conn = &data.0;
+    let rate = sqlx::query!("SELECT rate from swap_rate").fetch_one(&data.0).await?.rate;
+    let price = (amount as f32 * rate).floor() as i32;
+
+    let Ok(row) = sqlx::query!("SELECT balance,roblox_username FROM users WHERE discord_id=$1", author_id).fetch_one(conn).await else {
+        ctx.create_interaction_response(http.http(), |i| i.interaction_response_data(|m| m.content("You haven't linked your accounts"))).await?;
+        return Ok(())
+    };
+
+    if row.balance < price as i64 {
+        ctx.create_interaction_response(http.http(), |i| i.interaction_response_data(|m| m.content(format!("You don't have enough balance to withdraw {amount} robux, to do that, you need {price} and you only have {}", row.balance)))).await?;
+    }
+
+    if sqlx::query!("INSERT INTO withdraw(discord_id, amount, price) VALUES ($1, $2, $3)", author_id, amount, price).execute(conn).await.is_err() {
+        ctx.create_interaction_response(http.http(), |i| i.interaction_response_data(|m| m.content("Your already have a withdrawal process with that amount"))).await?;
+        return Ok(())
+    }
+
+    ctx.create_interaction_response(http.http(), |i| i.interaction_response_data(|m| {
+        m.content(format!("Withdrawal process of {} robux for a price of {} initiated for <@{}> with roblox account {}, Please create an asset worth that amount", amount, price, author_id, row.roblox_username.unwrap_or_default()))
+        .components(|c| c.create_action_row(|r| {
+            r.create_button(|b| {
+                b.custom_id("complete")
+                .label("Continue")
+                .style(serenity::ButtonStyle::Success)
+            })
+            .create_button(|b| {
+                b.custom_id(format!("withdraw_cancel-{}", amount))
+                .label("Cancel")
+                .style(serenity::ButtonStyle::Danger)
+            })
+        }))   
+    })).await?;
+    Ok(())
+}
+
+
 /// Cancels a verification attempt
 #[poise::command(slash_command, prefix_command)]
 async fn cancel(
@@ -176,6 +214,16 @@ async fn cancel_backend(author_id: &UserId, data: &Data, ctx: &impl crate::Inter
 
     sqlx::query!("DELETE FROM verif WHERE discord_id=$1", user_id).execute(conn).await?;
     ctx.create_interaction_response(http.http(), |i| i.interaction_response_data(|m| m.content("Your verification attempt was cancelled, use /link to start a new one"))).await?;
+    Ok(())
+}
+
+async fn cancel_withdraw_backend(author_id: &UserId, data: &Data, ctx: &impl crate::InteractionReponse, http: &impl CacheHttp, amount: i32) -> Result<(), Error> {
+    let conn = &data.0;
+    let user_id = author_id.0 as i64;
+    println!("called");
+    dbg!(amount);
+    sqlx::query!("DELETE FROM withdraw WHERE discord_id=$1 AND amount=$2", user_id, amount).execute(conn).await?;
+    ctx.create_interaction_response(http.http(), |i| i.interaction_response_data(|m| m.content(format!("You withdrawal process for {} robux was cancelled", amount)))).await?;
     Ok(())
 }
 
