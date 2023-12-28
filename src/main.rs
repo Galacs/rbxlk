@@ -5,7 +5,7 @@ use async_trait::async_trait;
 mod link;
 mod event;
 
-use link::{create_link_embed::create_embed, link::link, unlink::unlink};
+use link::{create_embeds::{create_link_embed, create_withdraw_embed}, link::link, unlink::unlink};
 
 pub struct Data(Pool<Postgres>, roboat::Client);
 pub type Error = Box<dyn std::error::Error + Send + Sync>;
@@ -210,7 +210,7 @@ async fn main() -> Result<(), Error> {
 
     let framework = poise::Framework::builder()
         .options(poise::FrameworkOptions {
-            commands: vec![balance(), set_rate(), link(), unlink(), create_embed(), complete(), cancel()],
+            commands: vec![balance(), set_rate(), link(), unlink(), create_link_embed(), create_withdraw_embed(), complete(), cancel()],
             event_handler: |ctx, event, framework, data| {
                 Box::pin(event::event_handler(ctx, event, framework, data))
             },
