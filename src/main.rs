@@ -1,4 +1,5 @@
 use poise::{serenity_prelude::{self as serenity, User, CacheHttp, UserId, CreateInteractionResponse}, ApplicationCommandOrAutocompleteInteraction};
+use roboat::catalog::Item;
 use sqlx::{Pool, Postgres, PgPool};
 use async_trait::async_trait;
 
@@ -177,7 +178,7 @@ pub async fn withdraw_backend(author_id: i64, data: &Data, ctx: &impl crate::Int
         m.content(format!("Withdrawal process of {} robux for a price of {} initiated for <@{}> with roblox account {}, Please create an asset worth that amount", amount, price, author_id, row.roblox_username.unwrap_or_default()))
         .components(|c| c.create_action_row(|r| {
             r.create_button(|b| {
-                b.custom_id("complete")
+                b.custom_id(format!("withdraw_complete-{}", amount))
                 .label("Continue")
                 .style(serenity::ButtonStyle::Success)
             })
@@ -222,6 +223,46 @@ async fn cancel_withdraw_backend(author_id: &UserId, data: &Data, ctx: &impl cra
     let user_id = author_id.0 as i64;
     sqlx::query!("DELETE FROM withdraw WHERE discord_id=$1 AND amount=$2", user_id, amount).execute(conn).await?;
     ctx.create_interaction_response(http.http(), |i| i.interaction_response_data(|m| m.content(format!("You withdrawal process for {} robux was cancelled", amount)))).await?;
+    Ok(())
+}
+
+async fn complete_withdraw_backend(author_id: &UserId, data: &Data, ctx: &impl crate::InteractionReponse, http: &impl CacheHttp, amount: i32, item_id: u64) -> Result<(), Error> {
+    let conn = &data.0;
+    let client = &data.1;
+    let user_id = author_id.0 as i64;
+
+    let Ok(row) = sqlx::query!("SELECT roblox_id,withdraw.discord_id FROM withdraw JOIN users ON withdraw.discord_id = users.discord_id WHERE withdraw.discord_id=$1 AND amount=$2", user_id, amount).fetch_one(conn).await else {
+        ctx.create_interaction_response(http.http(), |i| i.interaction_response_data(|m| m.content("You have no ongoing verification process, to start one, use the /link command"))).await?;
+        return Ok(())
+    };
+
+    let all_details = dbg!(client.item_details(vec![Item { item_type: roboat::catalog::ItemType::Asset, id: item_id }]).await)?;
+
+    let collectible_item_id = dbg!(client.collectible_item_id(item_id).await)?;
+
+    let collectible_product_id = dbg!(client.collectible_product_id(collectible_item_id.clone()).await?);
+
+    let collectible_creator_id = dbg!(client.collectible_creator_id(collectible_item_id.clone()).await?);
+
+    client.purchase_non_tradable_limited(
+        collectible_item_id,
+        collectible_product_id,
+        collectible_creator_id,
+        10,
+    ).await?;
+
+    println!("Purchased item {} for {} robux", item_id, 10);
+
+    // let user = client.user_details(row.roblox_id as u64).await?;
+    // if user.description.contains(&row.string) {
+    //     let mut tx = conn.begin().await?;
+    //     sqlx::query!("DELETE FROM verif WHERE discord_id=$1", user_id).execute(&mut *tx).await?;
+    //     sqlx::query!("INSERT INTO users(discord_id, roblox_id, roblox_username) VALUES ($1,$2,$3)", user_id, row.roblox_id as i64, user.username).execute(&mut *tx).await?;
+    //     tx.commit().await?;
+    //     ctx.create_interaction_response(http.http(), |i| i.interaction_response_data(|m| m.content(format!("Your discord account was successfully linked with {}, id: {}", user.username, user.id)))).await?;
+    // } else {
+    //     ctx.create_interaction_response(http.http(), |i| i.interaction_response_data(|m| m.content(format!("Your specified roblox account, {}, id: {}, doesn't currently have the string {} inside its description", user.username, user.id, row.string)))).await?;
+    // }
     Ok(())
 }
 
