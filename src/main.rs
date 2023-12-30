@@ -231,39 +231,36 @@ async fn complete_withdraw_backend(author_id: &UserId, data: &Data, ctx: &impl c
     let conn = &data.0;
     let client = &data.1;
     let user_id = author_id.0 as i64;
+    
+    let rate = sqlx::query!("SELECT rate from swap_rate").fetch_one(&data.0).await?.rate;
+    let price = (amount as f32 * rate).floor() as i32;
 
-    let Ok(row) = sqlx::query!("SELECT roblox_id,withdraw.discord_id FROM withdraw JOIN users ON withdraw.discord_id = users.discord_id WHERE withdraw.discord_id=$1 AND amount=$2", user_id, amount).fetch_one(conn).await else {
-        ctx.create_interaction_response(http.http(), |i| i.interaction_response_data(|m| m.content("You have no ongoing verification process, to start one, use the /link command"))).await?;
+    let Ok(row) = sqlx::query!("SELECT roblox_id,withdraw.discord_id,users.balance FROM withdraw JOIN users ON withdraw.discord_id = users.discord_id WHERE withdraw.discord_id=$1 AND amount=$2", user_id, amount).fetch_one(conn).await else {
+        ctx.create_interaction_response(http.http(), |i| i.interaction_response_data(|m| m.content("You have no ongoing withdrawal process, to start one, use the corresponding embed").ephemeral(true))).await?;
         return Ok(())
     };
 
-    let all_details = dbg!(client.item_details(vec![Item { item_type: roboat::catalog::ItemType::Asset, id: item_id }]).await)?;
+    let all_details = client.item_details(vec![Item { item_type: roboat::catalog::ItemType::Asset, id: item_id }]).await?;
+    let all_details = all_details.first().ok_or("no item found")?;
+    
+    let item_price = all_details.price.ok_or("no price")?;
 
-    let collectible_item_id = dbg!(client.collectible_item_id(item_id).await)?;
+    if item_price > amount as u64 {
+        ctx.create_interaction_response(http.http(), |i| i.interaction_response_data(|m| m.content(format!("Your item is too expensive, it should be {} robux but it is {} robux", amount, item_price)).ephemeral(true))).await?;
+    }
 
-    let collectible_product_id = dbg!(client.collectible_product_id(collectible_item_id.clone()).await?);
+    if price as i64 > row.balance {
+        ctx.create_interaction_response(http.http(), |i| i.interaction_response_data(|m| m.content(format!("You don't have enough balance on your account, you need {} but you only have {}", price, row.balance)).ephemeral(true))).await?;
+    }
 
-    let collectible_creator_id = dbg!(client.collectible_creator_id(collectible_item_id.clone()).await?);
+    let _ = client.purchase_tradable_limited(all_details.product_id.unwrap(), all_details.creator_id, 0, all_details.price.unwrap()).await;
+    
+    sqlx::query!("UPDATE users SET balance = balance - $1 WHERE discord_id = $2", price as i64, author_id.0 as i64).execute(conn).await?;
 
-    client.purchase_non_tradable_limited(
-        collectible_item_id,
-        collectible_product_id,
-        collectible_creator_id,
-        10,
-    ).await?;
+    ctx.create_interaction_response(http.http(), |i| i.interaction_response_data(|m| m.content(format!("You just withdrawed {} robux and used {} credit", item_price, price)).ephemeral(true))).await?;
+    
+    sqlx::query!("DELETE FROM withdraw WHERE discord_id=$1 AND amount=$2", user_id, amount).execute(conn).await?;
 
-    println!("Purchased item {} for {} robux", item_id, 10);
-
-    // let user = client.user_details(row.roblox_id as u64).await?;
-    // if user.description.contains(&row.string) {
-    //     let mut tx = conn.begin().await?;
-    //     sqlx::query!("DELETE FROM verif WHERE discord_id=$1", user_id).execute(&mut *tx).await?;
-    //     sqlx::query!("INSERT INTO users(discord_id, roblox_id, roblox_username) VALUES ($1,$2,$3)", user_id, row.roblox_id as i64, user.username).execute(&mut *tx).await?;
-    //     tx.commit().await?;
-    //     ctx.create_interaction_response(http.http(), |i| i.interaction_response_data(|m| m.content(format!("Your discord account was successfully linked with {}, id: {}", user.username, user.id)))).await?;
-    // } else {
-    //     ctx.create_interaction_response(http.http(), |i| i.interaction_response_data(|m| m.content(format!("Your specified roblox account, {}, id: {}, doesn't currently have the string {} inside its description", user.username, user.id, row.string)))).await?;
-    // }
     Ok(())
 }
 
