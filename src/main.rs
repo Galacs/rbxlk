@@ -146,7 +146,10 @@ async fn complete_backend(author_id: &UserId, data: &Data, ctx: &impl crate::Int
     if user.description.contains(&row.string) {
         let mut tx = conn.begin().await?;
         sqlx::query!("DELETE FROM verif WHERE discord_id=$1", user_id).execute(&mut *tx).await?;
-        sqlx::query!("INSERT INTO users(discord_id, roblox_id, roblox_username) VALUES ($1,$2,$3)", user_id, row.roblox_id as i64, user.username).execute(&mut *tx).await?;
+        let Ok(_) = sqlx::query!("INSERT INTO users(discord_id, roblox_id, roblox_username) VALUES ($1,$2,$3)", user_id, row.roblox_id as i64, user.username).execute(&mut *tx).await else {
+            ctx.create_interaction_response(http.http(), |i| i.interaction_response_data(|m| m.content(format!("This roblox account ({}) is already linked with another discord account", row.roblox_id)).ephemeral(true))).await?;
+            return Ok(());
+        };
         tx.commit().await?;
         ctx.create_interaction_response(http.http(), |i| i.interaction_response_data(|m| m.content(format!("Your discord account was successfully linked with {}, id: {}", user.username, user.id)))).await?;
     } else {
