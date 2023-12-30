@@ -296,12 +296,24 @@ async fn main() -> Result<(), Error> {
         .roblosecurity(std::env::var("ROBLOSECURITY").unwrap_or_default())
         .build();
 
+    let owner_id = {
+        let env_var = std::env::var("OWNER_ID");
+        if let Ok(str) = env_var {
+            UserId(str.parse().unwrap_or_default())
+        } else {
+            UserId(0)           
+        }
+    };
+    let mut owners = std::collections::HashSet::<serenity::UserId>::new();
+    owners.insert(owner_id);
+
     let framework = poise::Framework::builder()
         .options(poise::FrameworkOptions {
             commands: vec![balance(), set_rate(), link(), unlink(), create_link_embed(), create_withdraw_embed(), complete(), cancel()],
             event_handler: |ctx, event, framework, data| {
                 Box::pin(event::event_handler(ctx, event, framework, data))
             },
+            owners,
             ..Default::default()
         })
         .token(std::env::var("DISCORD_TOKEN").expect("missing DISCORD_TOKEN"))
