@@ -1,0 +1,3 @@
+[submodule "lib/roboat"]
+	path = lib/roboat
+	url = https://github.com/Galacs/roboat

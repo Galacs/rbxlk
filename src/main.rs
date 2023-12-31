@@ -1,5 +1,5 @@
-use poise::{serenity_prelude::{self as serenity, User, CacheHttp, UserId, CreateInteractionResponse}, ApplicationCommandOrAutocompleteInteraction};
-use roboat::catalog::Item;
+use poise::{serenity_prelude::{self as serenity, User, CacheHttp, UserId, CreateInteractionResponse, CreateInteractionResponseFollowup}, ApplicationCommandOrAutocompleteInteraction};
+use roboat::{catalog::Item, RoboatError};
 use sqlx::{Pool, Postgres, PgPool};
 use async_trait::async_trait;
 
@@ -59,6 +59,15 @@ pub trait InteractionReponse {
         for<'b> F: FnOnce(
             &'b mut CreateInteractionResponse<'a>,
         ) -> &'b mut CreateInteractionResponse<'a> + std::marker::Send;
+    async fn create_interaction_followup<'a, F>(
+        &self,
+        http: impl AsRef<serenity::Http> + std::marker::Send,
+        f: F,
+    ) -> Result<(), Error>
+    where
+        for<'b> F: FnOnce(
+            &'b mut CreateInteractionResponseFollowup<'a>,
+        ) -> &'b mut CreateInteractionResponseFollowup<'a> + std::marker::Send;
 }
 
 #[async_trait]
@@ -77,6 +86,23 @@ impl InteractionReponse for MergedInteraction<'_> {
             MergedInteraction::SerenityApplicationInteraction(interaction) => interaction.create_interaction_response(http, f).await?,
             MergedInteraction::SerenityMessageComponentInteraction(interaction) => interaction.create_interaction_response(http, f).await?,
             MergedInteraction::SerenityModalSubmitInteraction(interaction) => interaction.create_interaction_response(http, f).await?,
+        };
+        Ok(())
+    }
+    async fn create_interaction_followup<'a, F>(
+        &self,
+        http: impl AsRef<serenity::Http> + std::marker::Send,
+        f: F,
+    ) -> Result<(), Error>
+    where
+        for<'b> F: FnOnce(
+            &'b mut CreateInteractionResponseFollowup<'a>,
+        ) -> &'b mut CreateInteractionResponseFollowup<'a> + std::marker::Send
+    {
+        match self {
+            MergedInteraction::SerenityApplicationInteraction(interaction) => interaction.create_followup_message(http, f).await?,
+            MergedInteraction::SerenityMessageComponentInteraction(interaction) => interaction.create_followup_message(http, f).await?,
+            MergedInteraction::SerenityModalSubmitInteraction(interaction) => interaction.create_followup_message(http, f).await?,
         };
         Ok(())
     }
@@ -196,6 +222,14 @@ pub async fn withdraw_backend(author_id: i64, data: &Data, ctx: &impl crate::Int
     Ok(())
 }
 
+pub fn get_id_from_usr_input(mut input: String) -> Result<u64, Error> {
+    input = input.replace("://", "");
+    Ok({if input.contains('/') {
+        input.split('/').nth(2).unwrap_or_default()
+    } else {
+        &input
+    }}.parse()?)
+}
 
 /// Cancels a verification attempt
 #[poise::command(slash_command, prefix_command)]
@@ -243,25 +277,35 @@ async fn complete_withdraw_backend(author_id: &UserId, data: &Data, ctx: &impl c
         return Ok(())
     };
 
-    let all_details = client.item_details(vec![Item { item_type: roboat::catalog::ItemType::Asset, id: item_id }]).await?;
-    let all_details = all_details.first().ok_or("no item found")?;
-    
-    let item_price = all_details.price.ok_or("no price")?;
+    dbg!(item_id);
+    let future = tokio::time::timeout(tokio::time::Duration::from_secs(2), client.item_details(vec![Item { item_type: roboat::catalog::ItemType::Asset, id: item_id }]));
 
-    if item_price > amount as u64 {
-        ctx.create_interaction_response(http.http(), |i| i.interaction_response_data(|m| m.content(format!("Your item is too expensive, it should be {} robux but it is {} robux", amount, item_price)).ephemeral(true))).await?;
+    if let Ok(item) = dbg!(future.await)? {
+        let item = item.get(0).ok_or("no item result")?;
+        let item_price = item.price.ok_or("no price")?;
+        let product_id = item.product_id.ok_or("no product id")?;
+        if item_price > amount as u64 {
+            ctx.create_interaction_response(http.http(), |i| i.interaction_response_data(|m| m.content(format!("Your item is too expensive, it should be {} robux but it is {} robux", amount, item_price)).ephemeral(true))).await?;
+        }
+        if price as i64 > row.balance {
+            ctx.create_interaction_response(http.http(), |i| i.interaction_response_data(|m| m.content(format!("You don't have enough balance on your account, you need {} but you only have {}", price, row.balance)).ephemeral(true))).await?;
+        }
+        ctx.create_interaction_response(http.http(), |i| i.interaction_response_data(|m| m.content(format!("Trying to buy {} for {} robux", item.name, amount)).ephemeral(true))).await?;
+        let _ = dbg!(client.purchase_tradable_limited(product_id, item.creator_id, 0, price as u64).await);
+    } else {
+        ctx.create_interaction_response(http.http(), |i| i.interaction_response_data(|m| m.content(format!("Trying to buy game pass item for {} robux", amount)).ephemeral(true))).await?;
+        if let Err(err) = dbg!(client.purchase_tradable_limited(item_id, row.roblox_id as u64, 0, amount as u64).await) {
+            if let RoboatError::PurchaseTradableLimitedError(roboat::PurchaseTradableLimitedError::PriceChanged(p)) = err {
+                ctx.create_interaction_followup(http.http(), |m| m.content(format!("Your item price was set wrong, it should cost {} robux but it costs {}", amount, p)).ephemeral(true)).await?;
+                return Ok(());
+            }
+            ctx.create_interaction_followup(http.http(), |m| m.content("There was an error while trying to buy your item").ephemeral(true)).await?;
+            return Ok(());
+        };
     }
 
-    if price as i64 > row.balance {
-        ctx.create_interaction_response(http.http(), |i| i.interaction_response_data(|m| m.content(format!("You don't have enough balance on your account, you need {} but you only have {}", price, row.balance)).ephemeral(true))).await?;
-    }
-
-    let _ = client.purchase_tradable_limited(all_details.product_id.unwrap(), all_details.creator_id, 0, all_details.price.unwrap()).await;
-    
     sqlx::query!("UPDATE users SET balance = balance - $1 WHERE discord_id = $2", price as i64, author_id.0 as i64).execute(conn).await?;
-
-    ctx.create_interaction_response(http.http(), |i| i.interaction_response_data(|m| m.content(format!("You just withdrawed {} robux and used {} credit", item_price, price)).ephemeral(true))).await?;
-    
+    ctx.create_interaction_followup(http.http(), |i| i.content(format!("You just withdrawed {} robux and used {} credit", amount, price)).ephemeral(true)).await?;
     sqlx::query!("DELETE FROM withdraw WHERE discord_id=$1 AND amount=$2", user_id, amount).execute(conn).await?;
 
     Ok(())

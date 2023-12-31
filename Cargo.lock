@@ -1707,8 +1707,6 @@ dependencies = [
 [[package]]
 name = "roboat"
 version = "0.34.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "41e8c1a462ae3c7cd5711fd4a07108d1b3cb18ee42ba042c894b6be3921230d9"
 dependencies = [
  "base64 0.21.5",
  "reqwest",
