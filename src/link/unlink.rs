@@ -50,6 +50,9 @@ pub async fn unlink(
     if sqlx::query!("DELETE FROM users WHERE discord_id=$1", user_id).execute(conn).await.is_err() {
         ctx.say("Could not unlink your accounts").await?;
     } else {
+        let role = sqlx::query!("SELECT role_id from role").fetch_one(conn).await?.role_id.unwrap_or(0);
+        let mut member = ctx.author_member().await.ok_or("Not in a guild")?;
+        member.to_mut().remove_role(&ctx.http(), poise::serenity_prelude::RoleId(role as u64)).await?;
         ctx.say("Successfully unlinked your discord account and roblox account").await?;
     }
 

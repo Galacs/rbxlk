@@ -1,4 +1,4 @@
-use poise::{serenity_prelude::{self as serenity, User, CacheHttp, UserId, CreateInteractionResponse, CreateInteractionResponseFollowup}, ApplicationCommandOrAutocompleteInteraction};
+use poise::{serenity_prelude::{self as serenity, User, CacheHttp, UserId, CreateInteractionResponse, CreateInteractionResponseFollowup, Member, GuildId, RoleId}, ApplicationCommandOrAutocompleteInteraction};
 use roboat::{catalog::Item, RoboatError};
 use sqlx::{Pool, Postgres, PgPool};
 use async_trait::async_trait;
@@ -153,14 +153,14 @@ async fn complete(
         return Ok(())
     };
     let merged_interaction = MergedInteraction::SerenityApplicationInteraction(interaction);
-    complete_backend(&ctx.author().id, ctx.data(), &merged_interaction, ctx.http()).await?;
+    complete_backend(&ctx.author(), &ctx.guild_id().unwrap(), ctx.data(), &merged_interaction, ctx.http()).await?;
     Ok(())
 }
 
-async fn complete_backend(author_id: &UserId, data: &Data, ctx: &impl crate::InteractionReponse, http: &impl CacheHttp) -> Result<(), Error> {
+async fn complete_backend(author_id: &User, guild_id: &GuildId, data: &Data, ctx: &impl crate::InteractionReponse, http: &impl CacheHttp) -> Result<(), Error> {
     let conn = &data.0;
     let client = &data.1;
-    let user_id = author_id.0 as i64;
+    let user_id = author_id.id.0 as i64;
 
     let Ok(row) = sqlx::query!("SELECT roblox_id,string FROM verif WHERE discord_id=$1", user_id).fetch_one(conn).await else {
         ctx.create_interaction_response(http.http(), |i| i.interaction_response_data(|m| m.content("You have no ongoing verification process, to start one, use the /link command"))).await?;
@@ -168,6 +168,9 @@ async fn complete_backend(author_id: &UserId, data: &Data, ctx: &impl crate::Int
     };
 
     let user = client.user_details(row.roblox_id as u64).await?;
+    let role = sqlx::query!("SELECT role_id from role").fetch_one(&data.0).await?.role_id.unwrap_or(0);
+    let mut member = guild_id.member(&http, author_id.id).await?;
+    member.add_role(&http.http(), RoleId(role as u64)).await?;
 
     if user.description.contains(&row.string) {
         let mut tx = conn.begin().await?;
@@ -323,7 +326,18 @@ async fn set_rate(
     Ok(())
 }
 
-
+/// Sets global linked role
+#[poise::command(slash_command, prefix_command, owners_only, hide_in_help)]
+async fn set_role(
+    ctx: Context<'_>,
+    role: serenity::Role,
+) -> Result<(), Error> {
+    let conn = &ctx.data().0;
+    let role_id = role.id.0 as i64;
+    sqlx::query!("UPDATE role SET role_id = $1", role_id).execute(conn).await?;
+    ctx.say(format!("Role is now set to {}", role.name)).await?;
+    Ok(())
+}
 
 #[tokio::main]
 async fn main() -> Result<(), Error> {
@@ -353,7 +367,7 @@ async fn main() -> Result<(), Error> {
 
     let framework = poise::Framework::builder()
         .options(poise::FrameworkOptions {
-            commands: vec![balance(), set_rate(), link(), unlink(), create_link_embed(), create_withdraw_embed(), complete(), cancel()],
+            commands: vec![balance(), set_rate(), set_role(), link(), unlink(), create_link_embed(), create_withdraw_embed(), complete(), cancel()],
             event_handler: |ctx, event, framework, data| {
                 Box::pin(event::event_handler(ctx, event, framework, data))
             },

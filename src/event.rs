@@ -61,7 +61,7 @@ pub async fn event_handler(
         
                 },
                 "complete" => {
-                    complete_backend(&interaction.user.id, data, &merged_interaction, &ctx.http).await?;
+                    complete_backend(&interaction.user, &interaction.guild_id.unwrap(), data, &merged_interaction, &ctx.http).await?;
                 },
                 "cancel" => {
                     cancel_backend(&interaction.user.id, data, &merged_interaction, &ctx.http).await?;
