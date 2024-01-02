@@ -1,19 +1,21 @@
-FROM rust:1.74.0 AS chef 
+# FROM rust:1.74.0 AS chef 
 # We only pay the installation cost once, 
 # it will be cached from the second build onwards
-RUN cargo install cargo-chef 
-# RUN cargo install sqlx-cli
+# RUN cargo install cargo-chef 
+# # RUN cargo install sqlx-cli
+# WORKDIR app
+
+# FROM chef AS planner
+# COPY . .
+# RUN cargo chef prepare --recipe-path recipe.json
+
+# FROM chef AS builder
+FROM rust:1.74.0 AS builder
 WORKDIR app
-
-FROM chef AS planner
 COPY . .
-RUN cargo chef prepare --recipe-path recipe.json
-
-FROM chef AS builder
-COPY --from=planner /app/recipe.json recipe.json
-RUN cargo chef cook --release --recipe-path recipe.json
+# COPY --from=planner /app/recipe.json recipe.json
+# RUN cargo chef cook --release --recipe-path recipe.json
 # Build application
-COPY . .
 # RUN sqlx database create
 ENV SQLX_OFFLINE true
 RUN cargo build --release
