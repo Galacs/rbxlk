@@ -12,3 +12,6 @@ dotenv = { workspace = true }
 anyhow = { workspace = true }
 roboat = { workspace = true }
 actix-web = "4"
+
+[patch.crates-io]
+roboat = { path = "lib/roboat" }
